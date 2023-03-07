@@ -10,12 +10,12 @@ const {
 
 router
   .route("/")
-  .get(getContact)
+  .get(getContacts)
   .post(createContact);
 
 router
   .route("/:id")
-  .get(getContacts)
+  .get(getContact)
   .put(updateContact)
   .delete(deleteContact);
 
