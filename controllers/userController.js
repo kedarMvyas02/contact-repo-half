@@ -149,11 +149,9 @@ const currentUser = asyncHandler(async (req, res) => {
     email: findingEmail.email,
   });
   /*
-  {
-    id: findingEmail._id,
-    username: findingEmail.username,
-    email: findingEmail.email,
-  }
+  res.status(200).json(kedar)
+  kedar can also be kept here if we send decoded.user
+  in that else block of validateTokenHandler Middleware
   */
 });
 
