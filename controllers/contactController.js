@@ -2,7 +2,10 @@ const asyncHandler = require("express-async-handler");
 const Contact = require("../models/contactModel");
 
 const getContact = asyncHandler(async (req, res) => {
-  const contact = await Contact.findById(req.params.id);
+  const contact = await Contact.findOne({
+    _id: req.params.id,
+    user_id: req.user.id,
+  });
   if (!contact) {
     res.status(404);
     throw new Error("Contact not found");
@@ -11,12 +14,17 @@ const getContact = asyncHandler(async (req, res) => {
 });
 
 const getContacts = asyncHandler(async (req, res) => {
-  const contacts = await Contact.find();
+  //before
+  // const contacts = await Contact.find();
+
+  // so this user_id is the first schema i just added,
+  // ig have a ref: User, so it will show all details of
+  // that particular user (ig)
+  const contacts = await Contact.find({ user_id: req.user.id });
   res.status(200).json(contacts);
 });
 
 const createContact = async (req, res) => {
-  console.log("The request body is: ", req.body);
   const { name, email, phone } = req.body;
   if (!name || !email || !phone) {
     res.status(400);
@@ -26,6 +34,7 @@ const createContact = async (req, res) => {
     name,
     email,
     phone,
+    user_id: req.user.id,
   });
   res.status(201).json(contact);
 };
@@ -35,6 +44,10 @@ const updateContact = asyncHandler(async (req, res) => {
   if (!contact) {
     res.status(404);
     throw new Error("Contact not found");
+  }
+
+  if (contact.user_id.toString() !== req.user.id) {
+    throw new Error("User don't have access to update contact");
   }
 
   const updatedContact = await Contact.findByIdAndUpdate(
@@ -52,7 +65,11 @@ const deleteContact = asyncHandler(async (req, res) => {
     throw new Error("Contact not found");
   }
 
-  await Contact.findByIdAndDelete(req.params.id);
+  if (contact.user_id.toString() !== req.user.id) {
+    throw new Error("User don't have access to delete contact");
+  }
+
+  await Contact.deleteOne({ _id: req.params.id });
   res.status(200).json({
     message: "Your Contact has been deleted Successfully",
   });

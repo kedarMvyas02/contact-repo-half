@@ -2,6 +2,8 @@ const asyncHandler = require("express-async-handler");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const User = require("../models/userModel");
+const crypto = require("crypto");
+const sendEmail = require("../models/nodeMailer");
 
 const registerUser = asyncHandler(async (req, res) => {
   // we initialized the body values into variable names here
@@ -78,7 +80,7 @@ const loginUser = asyncHandler(async (req, res) => {
     throw new Error("Password field is mandatory");
   }
 
-  // finding useremail and checking if it is not present
+  // finding userEMail(P) and checking if it is not present
   // inside our DB, if not tell to register
 
   const userEmail = await User.findOne({ email });
@@ -91,7 +93,7 @@ const loginUser = asyncHandler(async (req, res) => {
   // once we found user's email from database (we store that in var)
   // as that variable will stay inside that block and we can get
   // all info of that block through it (including pass with dot keyword)
-  // hence we were able to use, userEmail.password lol
+  // hence we were able to use, userEMail(P).password lol
 
   const decryptedPass = await bcrypt.compare(password, userEmail.password);
 
@@ -106,11 +108,7 @@ const loginUser = asyncHandler(async (req, res) => {
     const accessToken = jwt.sign(
       // we have to pass a payload inside object in sign method
       {
-        user: {
-          username: userEmail.username,
-          email: userEmail.email,
-          id: userEmail._id,
-        },
+        id: userEmail._id,
       }, // now we have to pass a secret key
       // who tf knows y
       // (edit): ACCESS_TOKEN_SECRET is used to verify the token is
@@ -139,22 +137,156 @@ const currentUser = asyncHandler(async (req, res) => {
   // idk how
   //(edit): ik now, that how it is done lol
 
-  const { email } = req.body;
+  const { email, password } = req.body;
+  const decryptedPass = await bcrypt.compare(password, req.user.password);
+  if (req.user.email === email && decryptedPass) {
+    res.status(200).json(req.user);
+  } else {
+    res.status(401);
+    throw new Error("u entered wrong email or password");
+  }
 
-  const findingEmail = await User.findOne({ email });
-
+  /*
   res.status(200).json({
     id: findingEmail._id,
     username: findingEmail.username,
     email: findingEmail.email,
   });
-  /*
-  res.status(200).json(kedar)
-  kedar can also be kept here if we send decoded.user
-  in that else block of validateTokenHandler Middleware
   */
 });
 
 //////////////////////////////////////////////
 
-module.exports = { registerUser, loginUser, currentUser };
+const deleteUser = asyncHandler(async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email) {
+    res.status(400);
+    throw new Error("Email is mandatory");
+  } else if (!password) {
+    res.status(400);
+    throw new Error("Password field is mandatory");
+  }
+
+  const userEmail = await User.findOne({ email });
+
+  if (!userEmail) {
+    res.status(400);
+    throw new Error("Email is not registered yet");
+  }
+
+  const decryptedPass = await bcrypt.compare(password, userEmail.password);
+
+  if (decryptedPass) {
+    await userEmail.deleteOne({ _id: req.params.id });
+    res.status(200).json({
+      message: "Your Contact has been deleted Successfully",
+    });
+  } else {
+    res.status(400).json({
+      message: "Your password is wrong",
+    });
+  }
+});
+
+////////////////////////////////////////////////////////////////////////
+
+const forgotPassword = asyncHandler(async (req, res, next) => {
+  // 1) Get user based on POSTed email
+  const user = await User.findOne({ email: req.body.email });
+  if (!user) {
+    return next(new Error("There is no user with email address.", 404));
+  }
+
+  // 2) Generate the random reset token
+  const resetToken = user.createPasswordResetToken();
+  const data = await user.save({ validateBeforeSave: false });
+
+  console.log(typeof data.passwordResetToken);
+
+  // 3) Send it to user's email
+  const resetURL = `${req.protocol}://${req.get(
+    "host"
+  )}/api/users/resetpassword/${resetToken}`;
+
+  const message = `Hey ${user.username}, \n Forgot your password? Don't Worry :) \n Submit a PATCH request with your new password to: ${resetURL} \n If you didn't forget your password, please ignore this email ! `;
+
+  try {
+    await sendEmail({
+      email: user.email,
+      subject: "Your password token is valid only for 10 mins!",
+      message,
+    });
+
+    res.status(200).json({
+      status: "success",
+      message: "Token sent to email!",
+      user,
+      token: resetToken,
+    });
+  } catch (err) {
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save({ validateBeforeSave: false });
+
+    return next(
+      res.json({
+        err: err.message,
+      })
+    );
+  }
+});
+
+////////////////////////////////////////////////////
+
+const resetPassword = asyncHandler(async (req, res, next) => {
+  // 1) Get user based on the token
+  const hashedToken = crypto
+    .createHash("sha256")
+    .update(req.params.token)
+    .digest("hex");
+
+  console.log("hashed token is......", typeof hashedToken);
+  const user = await User.findOne({
+    passwordResetToken: hashedToken,
+    passwordResetExpires: { $gt: Date.now() },
+  });
+
+  console.log("The user is here: ", user);
+
+  // 2) if token not expired and there is a user, set new password
+  if (!user) {
+    return next(new Error("Token is invalid", 400));
+  }
+  const temp = req.body.password;
+  const hashedPassword = await bcrypt.hash(temp, 10);
+  user.password = hashedPassword;
+  user.passwordResetToken = undefined;
+  user.passwordResetExpires = undefined;
+  await user.save();
+  // 3) update changedPasswordAt property for the user
+
+  // 4) log the user in, send jwt
+
+  const accessToken = jwt.sign(
+    {
+      id: user._id,
+    },
+    process.env.ACCESS_TOKEN_SECRET,
+    {
+      expiresIn: "30d",
+    }
+  );
+  res.status(200).json({ accessToken });
+});
+
+////////////////////////////////////////////////////
+
+module.exports = {
+  registerUser,
+  loginUser,
+  currentUser,
+  forgotPassword,
+  resetPassword,
+  deleteUser,
+};

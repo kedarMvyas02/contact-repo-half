@@ -1,5 +1,6 @@
 const asyncHandler = require("express-async-handler");
 const jwt = require("jsonwebtoken");
+const User = require("../models/userModel");
 
 const validateToken = asyncHandler(async (req, res, next) => {
   let token;
@@ -24,13 +25,17 @@ const validateToken = asyncHandler(async (req, res, next) => {
     // also call them bearer, so we will compare token with
     // our secret key with jwt's own method named as jwt.verify()
 
-    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+    jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, async (err, decoded) => {
       if (err) {
         res.status(401);
         throw new Error("User is not Authorized");
       } else {
-        // kedar = decoded.user;
-        console.log("Jai hind");
+        const userExists = await User.findById(decoded.id);
+        if (!userExists) {
+          res.status(401);
+          throw new Error("User does not exists");
+        }
+        req.user = userExists;
         next();
       }
     });
